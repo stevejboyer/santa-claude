@@ -1,0 +1,58 @@
+{
+	"name": "santa-claude",
+	"version": "0.1.0",
+	"description": "A Claude Code wrapper that monitors session activity and token usage",
+	"main": "dist/index.js",
+	"bin": {
+		"santa-claude": "dist/cli.js"
+	},
+	"files": [
+		"dist/**/*",
+		"README.md",
+		"LICENSE"
+	],
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/stevejboyer/santa-claude.git"
+	},
+	"bugs": {
+		"url": "https://github.com/stevejboyer/santa-claude/issues"
+	},
+	"homepage": "https://github.com/stevejboyer/santa-claude#readme",
+	"scripts": {
+		"dev": "tsx src/cli.ts",
+		"build": "tsc && npm run lint",
+		"start": "node dist/cli.js",
+		"lint": "eslint 'src/**/*.ts'",
+		"lint:fix": "eslint 'src/**/*.ts' --fix",
+		"db:show": "sqlite3 ~/.santa-claude/sessions.db \"SELECT id, datetime(start_time/1000, 'unixepoch', 'localtime') as start_time, datetime(end_time/1000, 'unixepoch', 'localtime') as end_time, total_tokens FROM sessions ORDER BY start_time DESC;\""
+	},
+	"keywords": [
+		"claude",
+		"claude-code",
+		"wrapper",
+		"usage-tracking"
+	],
+	"author": "Steve Boyer",
+	"license": "MIT",
+	"dependencies": {
+		"chalk": "^5.3.0",
+		"commander": "^11.1.0",
+		"date-fns": "^3.0.0",
+		"node-pty": "^1.0.0",
+		"sqlite": "^5.1.1",
+		"sqlite3": "^5.1.6"
+	},
+	"devDependencies": {
+		"@types/node": "^20.10.0",
+		"@typescript-eslint/eslint-plugin": "^8.38.0",
+		"@typescript-eslint/parser": "^8.38.0",
+		"@vitest/ui": "^1.2.0",
+		"eslint": "^9.32.0",
+		"eslint-config-prettier": "^10.1.8",
+		"tsx": "^4.6.2",
+		"typescript": "^5.3.0",
+		"vitest": "^1.2.0"
+	},
+	"type": "module"
+}

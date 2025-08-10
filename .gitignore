@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+resources/
+*.tgz
+
+# Development files
+.DS_Store
+*.log
+.env
+.env.local
+
+# Database files
+*.db
+*.db-journal
+
+
+# Test files
+check-sessions.js
+test-*.js
+test-*.sh
