@@ -1,8 +1,9 @@
-import { createWriteStream, existsSync, mkdirSync } from 'fs';
+import { createWriteStream } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import type { SessionTracker, SessionData } from './session-tracker.js';
 // configManager no longer needed here after removing rollover logic
+import { promises as fsp } from 'fs';
 
 export class TokenMonitor {
 	private logStream: NodeJS.WritableStream;
@@ -20,9 +21,8 @@ export class TokenMonitor {
 
 		// Ensure log directory exists
 		const logDir = join(homedir(), '.santa-claude', 'logs');
-		if (!existsSync(logDir)) {
-			mkdirSync(logDir, { recursive: true });
-		}
+		// Ensure directory exists (async)
+		fsp.mkdir(logDir, { recursive: true }).catch(() => {});
 
 		// Create log file with timestamp
 		const logFile = join(logDir, `session-${sessionId.slice(0, 8)}-${Date.now()}.log`);
@@ -41,11 +41,12 @@ export class TokenMonitor {
 				if (!this.sessionStarted) {
 					// First token increase = actual session start
 					this.sessionStarted = true;
-					
+
 					// Check if this is a large jump from 0 (resuming existing session)
 					// If the jump is > 2000 tokens and we started from 0, it's likely resuming
-					const isLikelyResume = this.lastTokenCount === 0 && currentTokens > 2000;
-					
+					const RESUME_JUMP_THRESHOLD = 2000;
+					const isLikelyResume = this.lastTokenCount === 0 && currentTokens > RESUME_JUMP_THRESHOLD;
+
 					if (isLikelyResume) {
 						// This is resuming an existing session - use current count as baseline
 						this.instanceStartTokenCount = currentTokens;
@@ -53,7 +54,9 @@ export class TokenMonitor {
 					} else {
 						// Normal start - use the previous count as baseline
 						this.instanceStartTokenCount = this.lastTokenCount;
-						this.log(`Session started with first token activity: ${currentTokens} tokens (instance started from ${this.instanceStartTokenCount})`);
+						this.log(
+							`Session started with first token activity: ${currentTokens} tokens (instance started from ${this.instanceStartTokenCount})`
+						);
 					}
 
 					if (this.sessionTracker) {
@@ -88,10 +91,10 @@ export class TokenMonitor {
 				if (this.sessionTracker) {
 					// Calculate the tokens this instance has contributed since we started
 					const tokensFromThisInstance = currentTokens - this.instanceStartTokenCount;
-					
+
 					// Calculate the delta since our last report
 					const tokenDelta = tokensFromThisInstance - this.lastReportedTokens;
-					
+
 					if (tokenDelta > 0) {
 						// Always try to get the current active session before updating
 						this.sessionTracker
@@ -101,7 +104,7 @@ export class TokenMonitor {
 									// Use the active session ID for token updates
 									const sessionIdToUpdate = activeSession.id;
 									this.actualSessionId = sessionIdToUpdate; // Keep our reference current
-									
+
 									// Increment the session tokens by just the new delta
 									this.lastReportedTokens = tokensFromThisInstance; // Track what we've reported
 									return this.sessionTracker!.incrementSessionTokens(sessionIdToUpdate, tokenDelta);

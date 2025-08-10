@@ -7,6 +7,7 @@ import chalk from 'chalk';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import * as readline from 'readline';
+import { getOrdinalSuffix, getPackageVersion } from './utils.js';
 
 const execAsync = promisify(exec);
 
@@ -15,7 +16,7 @@ const wrapper = new ClaudeWrapper();
 program
 	.name('santa-claude')
 	.description('Claude Code wrapper with usage tracking')
-	.version('1.0.0', '-v, --version', 'Display version number')
+	.version(getPackageVersion(), '-v, --version', 'Display version number')
 	.helpOption('-h, --help', 'Display help for command')
 	.addHelpText(
 		'after',
@@ -26,6 +27,7 @@ Commands:
   santa-claude sessions           List recent sessions
   santa-claude status             Show running instances
   santa-claude update-session-length  Update the session window length
+  santa-claude gc [keep]          Purge old sessions, keeping last N (default 100)
   santa-claude set-subscription-date <day>  Set your billing cycle renewal day
 
 Claude Arguments:
@@ -71,6 +73,7 @@ program
 	.argument('[args...]', 'Arguments to pass to Claude')
 	.action(async args => {
 		try {
+			await ensureClaudeAvailable();
 			await wrapper.initialize();
 
 			// If no args provided, launch interactive Claude session
@@ -189,19 +192,6 @@ program
 	});
 
 // Helper functions
-export function getOrdinalSuffix(day: number): string {
-	if (day >= 11 && day <= 13) return 'th';
-	switch (day % 10) {
-		case 1:
-			return 'st';
-		case 2:
-			return 'nd';
-		case 3:
-			return 'rd';
-		default:
-			return 'th';
-	}
-}
 
 async function updateSessionLength() {
 	console.log(chalk.cyan('\n⚙️  Update Session Length\n'));
@@ -253,9 +243,13 @@ async function showStatus() {
 
 	// Check for running Claude instances
 	try {
-		const { stdout } = await execAsync('ps aux | grep "[c]laude" | grep -v santa-claude | wc -l');
-		const claudeCount = parseInt(stdout.trim());
-		console.log(`Santa Claude instances running: ${claudeCount}`);
+		if (process.platform === 'darwin' || process.platform === 'linux') {
+			const { stdout } = await execAsync('ps aux | grep "[c]laude" | grep -v santa-claude | wc -l');
+			const claudeCount = parseInt(stdout.trim());
+			console.log(`Santa Claude instances running: ${claudeCount}`);
+		} else {
+			console.log('Status check is currently supported on macOS/Linux only');
+		}
 	} catch {
 		console.log('Santa Claude instances running: Unable to check');
 	}
@@ -272,30 +266,51 @@ async function showStatus() {
 	}
 	await wrapper.close();
 }
-// Parse command line arguments
-// Check if first arg is a known command or help flag
-const knownCommands = ['status', 'stats', 'sessions', 'update-session-length', 'set-subscription-date'];
-const firstArg = process.argv[2];
-const isHelp = firstArg === '--help' || firstArg === '-h' || firstArg === '--version' || firstArg === '-v';
+// Maintenance: purge old sessions, keeping N most recent
+program
+	.command('gc [keep]')
+	.description('Purge old sessions, keeping the last N (default 100)')
+	.action(async (keep?: string) => {
+		const defaultKeep = 100;
+		const toKeep = keep ? parseInt(keep, 10) : defaultKeep;
+		if (Number.isNaN(toKeep) || toKeep < 0) {
+			console.error(chalk.red('Error: keep must be a non-negative number'));
+			process.exit(1);
+		}
 
-// If it's not a known command or help flag (or no args), treat everything as Claude args
-if (!isHelp && (!firstArg || !knownCommands.includes(firstArg))) {
-	// Run the default action with all args passed to Claude
-	const claudeArgs = process.argv.slice(2);
-	(async () => {
+		const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 		try {
-			await wrapper.initialize();
-			await wrapper.runSession(claudeArgs);
-		} catch (error: any) {
-			if (!error.message?.includes('Process exited with code')) {
-				console.error(chalk.red('Error:'), error.message);
+			const prompt = `This will purge all but the last ${toKeep} sessions from the db. Type (y) to confirm or (n) to cancel: `;
+			const answer = await new Promise<string>(resolve => rl.question(prompt, resolve));
+			const normalized = answer.trim().toLowerCase();
+			if (normalized !== 'y' && normalized !== 'yes') {
+				console.log(chalk.yellow('Canceled. No sessions were purged.'));
+				return;
 			}
+			await wrapper.initialize();
+			const deleted = await wrapper.purgeSessionsKeepLatest(toKeep);
+			console.log(chalk.green(`✅ Purged ${deleted} old session(s). Kept the most recent ${toKeep}.`));
+		} catch (error) {
+			console.error(chalk.red('Error:'), error);
 			process.exit(1);
 		} finally {
+			rl.close();
 			await wrapper.close();
 		}
-	})();
-} else {
-	// Normal command parsing
-	program.parse();
+	});
+
+// Parse command line arguments
+program.parseAsync();
+
+async function ensureClaudeAvailable(): Promise<void> {
+	try {
+		await execAsync('claude --version');
+	} catch (_err) {
+		console.error(
+			chalk.red('Error: The "claude" CLI is not available on your PATH.'),
+			'\nInstall it with: ',
+			chalk.cyan('npm install -g @anthropic-ai/claude-code')
+		);
+		process.exit(1);
+	}
 }

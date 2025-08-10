@@ -1,6 +1,6 @@
 import { SessionTracker } from './session-tracker.js';
 import chalk from 'chalk';
-import { getOrdinalSuffix } from './cli.js';
+import { getOrdinalSuffix, formatDate } from './utils.js';
 import { randomUUID } from 'crypto';
 import { TokenMonitor } from './token-monitor.js';
 import { TokenLineProcessor } from './token-line-processor.js';
@@ -170,18 +170,7 @@ export class ClaudeWrapper {
 
 		console.log(chalk.cyan(`\n📋 Recent Sessions (last ${limit}):\n`));
 
-		// Format dates as "M/D/YYYY h:mma"
-		const formatDate = (date: Date) => {
-			const month = date.getMonth() + 1;
-			const day = date.getDate();
-			const year = date.getFullYear();
-			const hours = date.getHours();
-			const minutes = date.getMinutes();
-			const ampm = hours >= 12 ? 'pm' : 'am';
-			const displayHours = hours % 12 || 12;
-			const displayMinutes = minutes.toString().padStart(2, '0');
-			return `${month}/${day}/${year} ${displayHours}:${displayMinutes}${ampm}`;
-		};
+		// Date formatting moved to utils
 
 		// Process all sessions to find maximum column widths
 		const processedSessions = sessions.map(session => {
@@ -203,25 +192,25 @@ export class ClaudeWrapper {
 		}
 	}
 
+	async purgeSessionsKeepLatest(keep: number): Promise<number> {
+		return this.tracker.purgeSessionsKeepLatest(keep);
+	}
+
 	private async showSessionStart() {
 		const monthlySessionCount = await this.tracker.getMonthlySessionCount();
 		const weeklySessionCount = await this.tracker.getWeeklySessionCount();
 		const subscriptionDay = await configManager.getSubscriptionRenewalDay();
 
-		const timeRemaining = await this.tracker.getSessionTimeRemaining();
-		const sessionRemainingString = timeRemaining
-			? `(${timeRemaining.hours}h ${timeRemaining.minutes}m remaining in current session)`
-			: `(no active session)`;
-		console.log(chalk.gray(`\n🎅 Santa Claude launching Claude Code instance... ${sessionRemainingString}`));
+		console.log(chalk.gray(`\n🎅 Santa Claude launching Claude Code instance...`));
 
 		// Show billing cycle count if subscription day is set, otherwise show monthly count
 		if (subscriptionDay) {
 			const billingCycleCount = await this.tracker.getBillingCycleSessionCount(subscriptionDay);
 			console.log(
 				chalk.dim(
-					`   ${billingCycleCount} sessions used so far in current billing cycle (renews ${subscriptionDay}${getOrdinalSuffix(
+					`   ${billingCycleCount} sessions used so far in current billing cycle (renews on the ${subscriptionDay}${getOrdinalSuffix(
 						subscriptionDay
-					)} of the month)`
+					)})`
 				)
 			);
 		} else {

@@ -2,7 +2,10 @@
 	"name": "santa-claude",
 	"version": "0.1.0",
 	"description": "A Claude Code wrapper that monitors session activity and token usage",
-	"main": "dist/index.js",
+	"main": "dist/cli.js",
+	"exports": {
+		".": "./dist/cli.js"
+	},
 	"bin": {
 		"santa-claude": "dist/cli.js"
 	},
@@ -47,12 +50,13 @@
 		"@types/node": "^20.10.0",
 		"@typescript-eslint/eslint-plugin": "^8.38.0",
 		"@typescript-eslint/parser": "^8.38.0",
-		"@vitest/ui": "^1.2.0",
 		"eslint": "^9.32.0",
 		"eslint-config-prettier": "^10.1.8",
 		"tsx": "^4.6.2",
-		"typescript": "^5.3.0",
-		"vitest": "^1.2.0"
+		"typescript": "^5.3.0"
 	},
-	"type": "module"
+	"type": "module",
+	"engines": {
+		"node": ">=18"
+	}
 }

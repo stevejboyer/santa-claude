@@ -74,7 +74,10 @@ export class TokenLineProcessor {
 
 			// Look for pattern with many spaces (50+) followed by optional ANSI codes and tokens
 			// This conservative pattern avoids interfering with UI rendering
-			const tokenPattern = /(\s{50,})((?:\x1b\[[0-9;]*m)*)(\d+\s+tokens?)/;
+			// Use a spacing threshold based on terminal width to avoid matching other text
+			const columns = process.stdout && process.stdout.columns ? process.stdout.columns : 80;
+			const minSpaces = Math.max(20, Math.floor(columns * 0.3));
+			const tokenPattern = new RegExp(`(\\s{${minSpaces},})((?:\\x1b\\[[0-9;]*m)*)(\\d+\\s+tokens?)`);
 			const match = data.match(tokenPattern);
 
 			if (match) {

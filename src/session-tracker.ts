@@ -19,6 +19,10 @@ export interface DetailedAnalytics {
 	dailyUsage: Array<{ date: string; sessions: number; totalTokens: number }>;
 }
 
+export interface SessionWithStats extends SessionData {
+	totalTokens: number;
+}
+
 export class SessionTracker {
 	private dbPath: string;
 	private db: any;
@@ -96,7 +100,7 @@ export class SessionTracker {
 		return this.rowToSessionData(row);
 	}
 
-	// Removed unused getSessionStartTime
+	//
 
 	async getSessionTimeRemaining(): Promise<{ hours: number; minutes: number } | null> {
 		// Get the currently active session
@@ -169,7 +173,7 @@ export class SessionTracker {
 		return result?.count || 0;
 	}
 
-	// Removed unused getMonthlyStats
+	//
 
 	async get30DayStats(): Promise<{
 		sessionCount: number;
@@ -280,9 +284,9 @@ export class SessionTracker {
 		return result?.count || 0;
 	}
 
-	// Removed unused getAllSessions
+	//
 
-	async getSessionsWithStats(limit: number = 10): Promise<any[]> {
+	async getSessionsWithStats(limit: number = 10): Promise<SessionWithStats[]> {
 		const rows = await this.db.all(
 			`
 			SELECT 
@@ -312,6 +316,19 @@ export class SessionTracker {
 			tokensToAdd,
 			sessionId
 		);
+	}
+
+	async purgeSessionsKeepLatest(keep: number): Promise<number> {
+		if (keep < 0) keep = 0;
+		// Delete all sessions except the latest N by start_time
+		const result = await this.db.run(
+			`DELETE FROM sessions WHERE id NOT IN (
+        SELECT id FROM sessions ORDER BY start_time DESC LIMIT ?
+      )`,
+			keep
+		);
+		// sqlite3 run returns { changes }
+		return result?.changes ?? 0;
 	}
 
 	private rowToSessionData(row: any): SessionData {

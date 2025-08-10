@@ -2,7 +2,7 @@
 
 > He sees you when you're coding! He knows when your session's awake! 👀
 
-Santa Claude is a usage tracking wrapper for [Claude Code](https://claude.ai/code) that helps you monitor your Pro/Max plan usage limits. It transparently wraps 🎁 the `claude` CLI, providing real-time session tracking and stats about your Claude Code usage.
+Santa Claude is a usage tracking wrapper for [Claude Code](https://claude.ai/code) that helps you monitor your Pro/Max plan usage limits. It transparently wraps 🎁 the `claude` CLI (from the `@anthropic-ai/claude-code` package), providing real-time session tracking and stats about your Claude Code usage.
 
 ## Why Santa Claude?
 
@@ -36,6 +36,8 @@ Santa Claude solves this by:
 
 -  Node.js 18+
 -  Claude Code CLI (`npm install -g @anthropic-ai/claude-code`)
+-  Note: `status` command is supported on macOS/Linux.
+-  `sqlite3` is a native dependency and may download binaries during install.
 
 ### Install from npm
 
@@ -84,6 +86,10 @@ santa-claude update-session-length
 
 # Set billing cycle date for accurate monthly tracking
 santa-claude set-subscription-date 15  # If your plan renews on the 15th
+
+# Purge old sessions, keeping last N (default 100)
+santa-claude gc
+santa-claude gc 200
 ```
 
 ## How it Works
@@ -138,7 +144,7 @@ santa-claude detects when a session has started by monitoring token output provi
 | `santa-claude [args...]`                 | Run Claude with tracking (passes all args) |
 | `santa-claude stats`                     | Show usage statistics and time remaining   |
 | `santa-claude sessions [count]`          | List recent sessions (default 10)          |
-| `santa-claude status`                    | Show running instances                     |
+| `santa-claude status`                    | Show running instances (Unix/macOS only)   |
 | `santa-claude update-session-length`     | Update the 5-hour session window length    |
 | `santa-claude set-subscription-date <n>` | Set billing renewal day (1-31)             |
 | `santa-claude --help`                    | Show help                                  |
@@ -207,6 +213,17 @@ The sessions table tracks:
 Two suggested ways to view the data manually are:
 1- visit https://sqliteviewer.app/ and browse to your local db file
 2- use the [sqlite3 npm package](https://www.npmjs.com/package/sqlite3) to query your table in your terminal: `sqlite3 ~/.santa-claude/sessions.db "SELECT * FROM sessions;"` or run `npm run db:show` which will run a query that formats the timestamp to be human readable.
+
+## Maintenance
+
+Purge old sessions, keeping only the most recent N (default 100):
+
+```bash
+santa-claude gc           # keep last 100
+santa-claude gc 200       # keep last 200
+```
+
+You will be prompted for confirmation before deletion.
 
 ## Troubleshooting
 
