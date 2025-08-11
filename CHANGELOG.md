@@ -5,7 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.0] - 2025-08-08
+## [0.1.1] - 2025-08-11
+
+### Added
+
+-  Automatic log file cleanup (runs every 24 hours, keeps 7 days/50 files max)
+-  New `santa-claude log-stats` command to view log statistics and trigger cleanup
+-  Query result caching for improved performance
+-  Database indexes on `total_tokens` column for faster queries
+-  Centralized error handling and logging system
+-  Custom error classes for better error tracking
+-  Type definitions for all database operations
+
+### Fixed
+
+-  Critical resource leaks in CLI and wrapper components
+-  Race conditions in token monitoring
+-  SQL injection vulnerabilities through input validation
+-  Commands (`stats`, `sessions`, `status`, `gc`, `log-stats`) now exit properly instead of hanging
+-  Memory leaks from uncleaned intervals
+-  Improved cleanup handlers for all resources
+
+### Changed
+
+-  Replaced all `any` types with proper TypeScript types
+-  Improved error messages and logging throughout
+-  Better resource management on process exit
+
+### Performance
+
+-  Added caching for frequently accessed database queries
+-  Database queries optimized with new indexes
+-  Reduced database load through intelligent caching
+
+## [0.1.0] - 2025-08-08
 
 ### Added
 

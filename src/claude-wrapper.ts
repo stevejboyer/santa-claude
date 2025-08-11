@@ -1,11 +1,13 @@
-import { SessionTracker } from './session-tracker.js';
+import { SessionTracker, DetailedAnalytics } from './session-tracker.js';
 import chalk from 'chalk';
-import { getOrdinalSuffix, formatDate } from './utils.js';
+import { getOrdinalSuffix, formatDate, getPackageVersion } from './utils.js';
 import { randomUUID } from 'crypto';
 import { TokenMonitor } from './token-monitor.js';
 import { TokenLineProcessor } from './token-line-processor.js';
 import * as pty from 'node-pty';
 import configManager from './config.js';
+import logger from './logger.js';
+import { ProcessError } from './errors.js';
 
 export interface WrapperOptions {
 	sessionId?: string;
@@ -88,7 +90,12 @@ export class ClaudeWrapper {
 
 		// Track process lifecycle
 		return new Promise<void>((resolve, reject) => {
-			claudePty.onExit(async ({ exitCode }) => {
+			let cleanupDone = false;
+			const cleanup = () => {
+				if (cleanupDone) return;
+				cleanupDone = true;
+
+				// Restore stdin state
 				if (process.stdin.isTTY) {
 					process.stdin.setRawMode(false);
 				}
@@ -97,9 +104,23 @@ export class ClaudeWrapper {
 				process.stdin.removeAllListeners('data');
 				process.stdin.pause();
 
+				// Remove resize listener
+				process.stdout.removeAllListeners('resize');
+
 				// Close the token monitor and line processor
 				tokenMonitor.close();
 				tokenLineProcessor.close();
+
+				// Kill the PTY process if still running
+				try {
+					claudePty.kill();
+				} catch (_e) {
+					// Process might already be dead
+				}
+			};
+
+			claudePty.onExit(async ({ exitCode }) => {
+				cleanup();
 
 				// Sessions now have fixed end times, no need to update
 
@@ -108,8 +129,18 @@ export class ClaudeWrapper {
 				if (exitCode === 0) {
 					resolve();
 				} else {
-					reject(new Error(`Process exited with code ${exitCode}`));
+					reject(new ProcessError(`Process exited with code ${exitCode}`, exitCode));
 				}
+			});
+
+			// Ensure cleanup on unexpected errors
+			process.once('uncaughtException', error => {
+				cleanup();
+				throw error;
+			});
+			process.once('unhandledRejection', reason => {
+				cleanup();
+				throw reason;
 			});
 		});
 	}
@@ -154,7 +185,7 @@ export class ClaudeWrapper {
 
 		// Weekly stats
 		const weeklyTokens = weeklyStats.totalTokens.input + weeklyStats.totalTokens.output;
-		console.log(formatRow('This week', weeklyStats.sessionCount, weeklyTokens));
+		console.log(formatRow('This calendar week', weeklyStats.sessionCount, weeklyTokens));
 
 		// Billing cycle stats
 		if (billingStats) {
@@ -201,7 +232,8 @@ export class ClaudeWrapper {
 		const weeklySessionCount = await this.tracker.getWeeklySessionCount();
 		const subscriptionDay = await configManager.getSubscriptionRenewalDay();
 
-		console.log(chalk.gray(`\n🎅 Santa Claude launching Claude Code instance...`));
+		const version = getPackageVersion();
+		console.log(chalk.gray(`\n🎅 Santa Claude v${version} monitoring new Claude Code instance...`));
 
 		// Show billing cycle count if subscription day is set, otherwise show monthly count
 		if (subscriptionDay) {
@@ -219,7 +251,7 @@ export class ClaudeWrapper {
 		}
 
 		// Always show weekly count
-		console.log(chalk.dim(`   ${weeklySessionCount} sessions used so far this week\n`));
+		console.log(chalk.dim(`   ${weeklySessionCount} sessions used so far this calendar week\n`));
 
 		// Show subscription renewal reminder if not set
 		if (!subscriptionDay) {
@@ -234,11 +266,11 @@ export class ClaudeWrapper {
 	private async showSessionEnd() {
 		const timeRemaining = await this.tracker.getSessionTimeRemaining();
 		if (timeRemaining) {
-			console.log(
+			logger.info(
 				chalk.gray(`\n👋🎅 Current session time remaining: ${timeRemaining.hours}h ${timeRemaining.minutes}m\n`)
 			);
 		} else {
-			console.log(chalk.gray(`\n👋🎅 Session ended\n`));
+			logger.info(chalk.gray(`\n👋🎅 Session ended\n`));
 		}
 	}
 
@@ -246,7 +278,7 @@ export class ClaudeWrapper {
 		return this.tracker.getSessionTimeRemaining();
 	}
 
-	async getDetailedAnalytics() {
+	async getDetailedAnalytics(): Promise<DetailedAnalytics> {
 		return this.tracker.getDetailedAnalytics();
 	}
 

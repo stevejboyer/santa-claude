@@ -1,12 +1,12 @@
-import { createWriteStream } from 'fs';
+import { createWriteStream, WriteStream } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import type { SessionTracker, SessionData } from './session-tracker.js';
-// configManager no longer needed here after removing rollover logic
 import { promises as fsp } from 'fs';
+import logManager from './log-manager.js';
 
 export class TokenMonitor {
-	private logStream: NodeJS.WritableStream;
+	private logStream: WriteStream;
 	private sessionId: string;
 	private lastTokenCount: number = 0;
 	private sessionStarted: boolean = false;
@@ -14,10 +14,19 @@ export class TokenMonitor {
 	private actualSessionId?: string;
 	private instanceStartTokenCount: number = 0;
 	private lastReportedTokens: number = 0;
+	private sessionPromise?: Promise<SessionData>;
+	private sessionLock: boolean = false;
+	private static cleanupStarted: boolean = false;
 
 	constructor(sessionId: string, sessionTracker?: SessionTracker) {
 		this.sessionId = sessionId;
 		this.sessionTracker = sessionTracker;
+
+		// Start automatic log cleanup (only once per process)
+		if (!TokenMonitor.cleanupStarted) {
+			TokenMonitor.cleanupStarted = true;
+			logManager.startAutoCleanup();
+		}
 
 		// Ensure log directory exists
 		const logDir = join(homedir(), '.santa-claude', 'logs');
@@ -59,9 +68,10 @@ export class TokenMonitor {
 						);
 					}
 
-					if (this.sessionTracker) {
-						this.sessionTracker
-							.createSession(this.sessionId)
+					if (this.sessionTracker && !this.sessionPromise) {
+						// Create session only once, store the promise
+						this.sessionPromise = this.sessionTracker.createSession(this.sessionId);
+						this.sessionPromise
 							.then((session: SessionData) => {
 								// Always use the returned session ID (might be an existing active session)
 								this.actualSessionId = session.id;
@@ -71,24 +81,10 @@ export class TokenMonitor {
 								this.log(`Failed to create session: ${err.message}`);
 							});
 					}
-				} else if (this.sessionTracker && !this.actualSessionId) {
-					// Session was started but we don't have an actualSessionId yet
-					// This can happen if we're resuming after the initial session creation
-					this.sessionTracker
-						.getActiveSession()
-						.then((session: SessionData | null) => {
-							if (session) {
-								this.actualSessionId = session.id;
-								this.log(`Retrieved active session: ${session.id}`);
-							}
-						})
-						.catch((err: Error) => {
-							this.log(`Failed to get active session: ${err.message}`);
-						});
 				}
 
 				// Update token count in database
-				if (this.sessionTracker) {
+				if (this.sessionTracker && this.actualSessionId && !this.sessionLock) {
 					// Calculate the tokens this instance has contributed since we started
 					const tokensFromThisInstance = currentTokens - this.instanceStartTokenCount;
 
@@ -96,26 +92,29 @@ export class TokenMonitor {
 					const tokenDelta = tokensFromThisInstance - this.lastReportedTokens;
 
 					if (tokenDelta > 0) {
-						// Always try to get the current active session before updating
+						// Prevent concurrent updates
+						this.sessionLock = true;
+						const sessionIdToUpdate = this.actualSessionId;
+						
+						// Increment the session tokens by just the new delta
+						this.lastReportedTokens = tokensFromThisInstance; // Track what we've reported
 						this.sessionTracker
-							.getActiveSession()
-							.then((activeSession: SessionData | null) => {
-								if (activeSession) {
-									// Use the active session ID for token updates
-									const sessionIdToUpdate = activeSession.id;
-									this.actualSessionId = sessionIdToUpdate; // Keep our reference current
-
-									// Increment the session tokens by just the new delta
-									this.lastReportedTokens = tokensFromThisInstance; // Track what we've reported
-									return this.sessionTracker!.incrementSessionTokens(sessionIdToUpdate, tokenDelta);
-								} else {
-									this.log(`No active session found for token update`);
-								}
+							.incrementSessionTokens(sessionIdToUpdate, tokenDelta)
+							.then(() => {
+								this.sessionLock = false;
 							})
 							.catch((err: Error) => {
 								this.log(`Failed to update token count: ${err.message}`);
+								this.sessionLock = false;
 							});
 					}
+				} else if (this.sessionTracker && !this.actualSessionId && this.sessionPromise) {
+					// Wait for session creation to complete before updating tokens
+					this.sessionPromise.then(() => {
+						// Tokens will be updated on next processOutput call
+					}).catch(() => {
+						// Session creation failed, logged above
+					});
 				}
 
 				this.lastTokenCount = currentTokens;

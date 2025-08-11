@@ -90,6 +90,9 @@ santa-claude set-subscription-date 15  # If your plan renews on the 15th
 # Purge old sessions, keeping last N (default 100)
 santa-claude gc
 santa-claude gc 200
+
+# View log file statistics and cleanup info
+santa-claude log-stats
 ```
 
 ## How it Works
@@ -122,7 +125,7 @@ santa-claude detects when a session has started by monitoring token output provi
 
    -  Uses `node-pty` to preserve Claude's interactive features
    -  Monitors output for token usage patterns
-   -  Detects actual API activity vs idle time
+   -  Detects token increases and uses that to determine session usage
    -  Keeps track of session lifecycle
 
 2. **Session Tracking**
@@ -147,6 +150,8 @@ santa-claude detects when a session has started by monitoring token output provi
 | `santa-claude status`                    | Show running instances (Unix/macOS only)   |
 | `santa-claude update-session-length`     | Update the 5-hour session window length    |
 | `santa-claude set-subscription-date <n>` | Set billing renewal day (1-31)             |
+| `santa-claude gc [keep]`                 | Purge old sessions (default: keep 100)     |
+| `santa-claude log-stats`                 | Show log file statistics and cleanup info  |
 | `santa-claude --help`                    | Show help                                  |
 
 ## Nitty Gritty
@@ -156,6 +161,14 @@ santa-claude detects when a session has started by monitoring token output provi
    **Resume Detection**: When resuming an existing Claude Code session, the CLI initially shows 0 tokens, then jumps to the full session total on the first interaction. Santa Claude detects jumps >2000 tokens from 0 and treats them as session resumes rather than new tokens, preventing double-counting, but the token count could therefore not be entirely accurate in this case.
 
 2. **Debugging info**: Session logs stored in `~/.santa-claude/logs/`
+
+   **Automatic Log Cleanup**: Santa Claude automatically manages log files to prevent disk bloat:
+   - **Cleanup runs every 24 hours** (and immediately on first session start)
+   - **Retention policy**: Keeps logs for **7 days** maximum
+   - **File limit**: Keeps only the **50 most recent** log files
+   - Old logs exceeding these limits are automatically deleted
+   - Run `santa-claude log-stats` to view current log statistics and trigger manual cleanup
+   - Logs are lightweight text files that track token usage and session lifecycle events
 
 3. **Config file**: Santa Claude stores configuration in `~/.santa-claude/config.json`. This file is created automatically on first run. Currently it stores only the session length. If Anthropic updates the length from 5 hours to another number of hours you can update the value in this file or run `santa-claude update-session-length`.
 

@@ -8,6 +8,8 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import * as readline from 'readline';
 import { getOrdinalSuffix, getPackageVersion } from './utils.js';
+import logger from './logger.js';
+import { ProcessError, ValidationError } from './errors.js';
 
 const execAsync = promisify(exec);
 
@@ -29,6 +31,7 @@ Commands:
   santa-claude update-session-length  Update the session window length
   santa-claude gc [keep]          Purge old sessions, keeping last N (default 100)
   santa-claude set-subscription-date <day>  Set your billing cycle renewal day
+  santa-claude log-stats          Show log file statistics and cleanup info
 
 Claude Arguments:
   All arguments are passed directly to Claude Code. Common examples:
@@ -65,6 +68,7 @@ program
 	.description('Show running instances')
 	.action(async () => {
 		await showStatus();
+		process.exit(0);
 	});
 
 // Default command - run claude with tracking
@@ -72,6 +76,30 @@ program
 	.allowUnknownOption()
 	.argument('[args...]', 'Arguments to pass to Claude')
 	.action(async args => {
+		let cleanupDone = false;
+		const cleanup = async () => {
+			if (!cleanupDone) {
+				cleanupDone = true;
+				// Ensure stdin is properly cleaned up
+				if (process.stdin.isTTY) {
+					process.stdin.setRawMode(false);
+				}
+				process.stdin.removeAllListeners('data');
+				process.stdin.pause();
+				await wrapper.close();
+			}
+		};
+
+		// Handle unexpected exits
+		process.on('SIGINT', async () => {
+			await cleanup();
+			process.exit(130); // Standard exit code for SIGINT
+		});
+		process.on('SIGTERM', async () => {
+			await cleanup();
+			process.exit(143); // Standard exit code for SIGTERM
+		});
+
 		try {
 			await ensureClaudeAvailable();
 			await wrapper.initialize();
@@ -80,15 +108,20 @@ program
 			// (don't show help - just pass through to Claude)
 
 			await wrapper.runSession(args);
-		} catch (error: any) {
+		} catch (error) {
 			// Don't show error if it's just a non-zero exit code
-			if (!error.message?.includes('Process exited with code')) {
-				console.error(chalk.red('Error:'), error.message);
+			if (error instanceof ProcessError) {
+				// Silent exit for normal process exit codes
+			} else if (error instanceof Error) {
+				logger.error('Command execution failed', error);
+			} else {
+				logger.error('Unknown error occurred', error);
 			}
+			await cleanup();
 			process.exit(1);
-		} finally {
-			await wrapper.close();
 		}
+		await cleanup();
+		process.exit(0);
 	});
 
 program
@@ -113,26 +146,27 @@ program
 			}
 
 			// Only show model usage if we have meaningful data
-			const knownModels = analytics.modelUsage.filter(m => m.model !== 'unknown');
+			const knownModels = analytics.modelUsage.filter((m) => m.model !== 'unknown');
 			if (knownModels.length > 0) {
 				console.log('\nModel usage (when specified):');
-				knownModels.forEach(m => {
+				knownModels.forEach((m) => {
 					console.log(`  ${m.model}: ${m.count} sessions`);
 				});
 			}
 
 			if (analytics.dailyUsage.length > 0) {
 				console.log('\nLast 7 days:');
-				analytics.dailyUsage.forEach(d => {
+				analytics.dailyUsage.forEach((d) => {
 					const tokensStr = d.totalTokens > 0 ? `, ${d.totalTokens.toLocaleString()} tokens` : '';
 					console.log(`  ${d.date}: ${d.sessions} sessions${tokensStr}`);
 				});
 			}
 		} catch (error) {
-			console.error(chalk.red('Error:'), error);
+			logger.error('Error occurred', error);
 			process.exit(1);
 		} finally {
 			await wrapper.close();
+			process.exit(0);
 		}
 	});
 
@@ -146,10 +180,11 @@ program
 			const sessionCount = count ? parseInt(count) : 10;
 			await wrapper.listRecentSessions(sessionCount);
 		} catch (error) {
-			console.error(chalk.red('Error:'), error);
+			logger.error('Error occurred', error);
 			process.exit(1);
 		} finally {
 			await wrapper.close();
+			process.exit(0);
 		}
 	});
 
@@ -160,7 +195,7 @@ program
 		try {
 			await updateSessionLength();
 		} catch (error) {
-			console.error(chalk.red('Error:'), error);
+			logger.error('Error occurred', error);
 			process.exit(1);
 		}
 	});
@@ -172,8 +207,7 @@ program
 		try {
 			const dayNum = parseInt(day, 10);
 			if (isNaN(dayNum) || dayNum < 1 || dayNum > 31) {
-				console.error(chalk.red('Error: Day must be a number between 1 and 31'));
-				process.exit(1);
+				throw new ValidationError('Day must be a number between 1 and 31');
 			}
 
 			await configManager.setSubscriptionRenewalDay(dayNum);
@@ -186,7 +220,7 @@ program
 				)
 			);
 		} catch (error) {
-			console.error(chalk.red('Error:'), error);
+			logger.error('Error occurred', error);
 			process.exit(1);
 		}
 	});
@@ -274,7 +308,7 @@ program
 		const defaultKeep = 100;
 		const toKeep = keep ? parseInt(keep, 10) : defaultKeep;
 		if (Number.isNaN(toKeep) || toKeep < 0) {
-			console.error(chalk.red('Error: keep must be a non-negative number'));
+			logger.error('keep must be a non-negative number');
 			process.exit(1);
 		}
 
@@ -291,11 +325,44 @@ program
 			const deleted = await wrapper.purgeSessionsKeepLatest(toKeep);
 			console.log(chalk.green(`✅ Purged ${deleted} old session(s). Kept the most recent ${toKeep}.`));
 		} catch (error) {
-			console.error(chalk.red('Error:'), error);
+			logger.error('Error occurred', error);
 			process.exit(1);
 		} finally {
 			rl.close();
 			await wrapper.close();
+			process.exit(0);
+		}
+	});
+
+// Add log-stats command
+program
+	.command('log-stats')
+	.description('Show log file statistics and cleanup info')
+	.action(async () => {
+		try {
+			const { default: logManager } = await import('./log-manager.js');
+			const stats = await logManager.getLogStats();
+			
+			console.log(chalk.cyan('\n📊 Log File Statistics\n'));
+			console.log(`Total log files: ${stats.totalFiles}`);
+			console.log(`Total size: ${(stats.totalSizeBytes / 1024 / 1024).toFixed(2)} MB`);
+			
+			if (stats.oldestLog && stats.newestLog) {
+				console.log(`Oldest log: ${stats.oldestLog.toLocaleDateString()}`);
+				console.log(`Newest log: ${stats.newestLog.toLocaleDateString()}`);
+			}
+			
+			console.log(chalk.gray('\nLogs older than 7 days or exceeding 50 files will be automatically cleaned up.'));
+			
+			// Optionally trigger cleanup now
+			const cleaned = await logManager.cleanupOldLogs();
+			if (cleaned > 0) {
+				console.log(chalk.green(`\n✅ Cleaned up ${cleaned} old log file(s)`));
+			}
+			process.exit(0);
+		} catch (error) {
+			logger.error('Failed to get log statistics', error);
+			process.exit(1);
 		}
 	});
 

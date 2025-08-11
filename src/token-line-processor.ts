@@ -9,12 +9,21 @@ export class TokenLineProcessor {
 	private lastProcessedTokens: number = 0;
 	private isProcessingUpdate: boolean = false;
 	private updateInterval: NodeJS.Timeout | null = null;
+	private closed: boolean = false;
 
 	constructor(tracker: SessionTracker) {
 		this.tracker = tracker;
 		// Update cached time info periodically
-		this.updateTimeInfo();
-		this.updateInterval = setInterval(() => this.updateTimeInfo(), 5000);
+		this.updateTimeInfo().catch(() => {
+			// Ignore errors during initialization
+		});
+		this.updateInterval = setInterval(() => {
+			if (!this.closed) {
+				this.updateTimeInfo().catch(() => {
+					// Ignore errors during periodic updates
+				});
+			}
+		}, 5000);
 	}
 
 	private async updateTimeInfo() {
@@ -39,8 +48,10 @@ export class TokenLineProcessor {
 				this.currentTokens = newTokens;
 				const now = Date.now();
 				// Increase throttling to 500ms to reduce updates during typing
-				if (now - this.lastUpdateTime > 500) {
-					this.updateTimeInfo();
+				if (now - this.lastUpdateTime > 500 && !this.closed) {
+					this.updateTimeInfo().catch(() => {
+						// Ignore errors during token updates
+					});
 					this.lastUpdateTime = now;
 				}
 			}
@@ -119,7 +130,8 @@ export class TokenLineProcessor {
 		return data;
 	}
 
-	close() {
+	close(): void {
+		this.closed = true;
 		if (this.updateInterval) {
 			clearInterval(this.updateInterval);
 			this.updateInterval = null;
