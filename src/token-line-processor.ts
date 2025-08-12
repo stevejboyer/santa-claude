@@ -27,13 +27,18 @@ export class TokenLineProcessor {
 	}
 
 	private async updateTimeInfo() {
-		const timeRemaining = await this.tracker.getSessionTimeRemaining();
+		try {
+			const timeRemaining = await this.tracker.getSessionTimeRemaining();
 
-		if (timeRemaining) {
-			const timeStr = `${timeRemaining.hours}:${timeRemaining.minutes.toString().padStart(2, '0')} remaining`;
-			this.lastTimeInfo = `🎅 ${timeStr}`;
-		} else {
-			this.lastTimeInfo = `🎅 No active session`;
+			if (timeRemaining) {
+				const timeStr = `${timeRemaining.hours}:${timeRemaining.minutes.toString().padStart(2, '0')} remaining`;
+				this.lastTimeInfo = `🎅 ${timeStr}`;
+			} else {
+				this.lastTimeInfo = `🎅 No active session`;
+			}
+		} catch (_error) {
+			// Don't update timeInfo if there's an error - keep the last known state
+			// This prevents flickering between "active" and "no session" states
 		}
 	}
 

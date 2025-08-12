@@ -90,22 +90,36 @@ export class SessionTracker {
 		const activeSession = await this.getActiveSession();
 		if (activeSession) {
 			logger.debug(`Reusing existing active session from ${activeSession.startTime.toLocaleTimeString()}`);
+			// Update cache with the active session to ensure consistency
+			statsCache.set('active_session', activeSession, 10000);
 			return activeSession;
 		}
 
-		// Create new session with calculated end time
-		await this.db.run(`INSERT INTO sessions (id, start_time, end_time) VALUES (?, ?, ?)`, sessionId, now, endTime);
+		try {
+			// Create new session with calculated end time
+			await this.db.run(`INSERT INTO sessions (id, start_time, end_time) VALUES (?, ?, ?)`, sessionId, now, endTime);
+		} catch (error) {
+			// Handle potential race condition where another process created a session
+			logger.debug('Session creation failed, checking for existing session:', error);
+			const existingSession = await this.getActiveSession();
+			if (existingSession) {
+				return existingSession;
+			}
+			throw error;
+		}
 
-		// Invalidate relevant caches
-		statsCache.delete('active_session');
-		statsCache.delete('monthly_session_count');
-		statsCache.delete('weekly_session_count');
-
-		return {
+		const newSession = {
 			id: sessionId,
 			startTime: new Date(now),
 			endTime: new Date(endTime),
 		};
+
+		// Invalidate relevant caches and immediately cache the new session
+		statsCache.delete('monthly_session_count');
+		statsCache.delete('weekly_session_count');
+		statsCache.set('active_session', newSession, 10000);
+
+		return newSession;
 	}
 
 	async getActiveSession(): Promise<SessionData | null> {
@@ -118,20 +132,37 @@ export class SessionTracker {
 			if (cached && cached.endTime.getTime() > Date.now()) {
 				return cached;
 			}
-			// Clear invalid cache
-			statsCache.delete(cacheKey);
+			// Don't immediately clear cache - let database query confirm before invalidating
 		}
 
 		const now = Date.now();
-		const row = await this.db.get<SessionRow>(
-			`SELECT * FROM sessions WHERE start_time <= ? AND end_time > ? ORDER BY start_time DESC LIMIT 1`,
-			now,
-			now
-		);
+		let row: SessionRow | undefined;
+		
+		try {
+			row = await this.db.get<SessionRow>(
+				`SELECT * FROM sessions WHERE start_time <= ? AND end_time > ? ORDER BY start_time DESC LIMIT 1`,
+				now,
+				now
+			);
+		} catch (error) {
+			// If database query fails and we have cached data that's close to valid, use it
+			if (cached && cached.endTime.getTime() > Date.now() - 30000) { // 30 second grace period
+				logger.debug('Database query failed, using cached session data as fallback');
+				return cached;
+			}
+			logger.error('Failed to query active session:', error);
+			return null;
+		}
 
 		const result = row ? this.rowToSessionData(row) : null;
 		
+		// Only clear cache if we got a definitive result from database
+		if (cached !== undefined && (!result || result.id !== cached?.id)) {
+			statsCache.delete(cacheKey);
+		}
+		
 		// Cache for 10 seconds (frequent access during session)
+		// Always cache the result, even if null, to prevent hammering DB
 		statsCache.set(cacheKey, result, 10000);
 		
 		return result;
