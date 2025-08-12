@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2025-08-12
+
+### Fixed
+
+- **Critical session detection bug**: Fixed cache validation logic that was preventing expired sessions from being properly cleared
+- **Session countdown display**: Resolved intermittent "No active session" display during active sessions
+- **Session reuse issue**: Fixed bug where expired sessions were incorrectly being reused instead of creating new sessions
+- **Cache corruption**: Improved cache invalidation to prevent stale session data from persisting
+- **Race conditions**: Enhanced error handling in session creation and cache management
+
+### Changed
+
+- Simplified session cache validation logic for better reliability
+- Removed problematic fallback mechanisms that were masking cache issues
+- Improved session state consistency across multiple santa-claude instances
+
 ## [0.1.1] - 2025-08-11
 
 ### Added
