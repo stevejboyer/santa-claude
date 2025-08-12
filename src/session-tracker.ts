@@ -132,7 +132,8 @@ export class SessionTracker {
 			if (cached && cached.endTime.getTime() > Date.now()) {
 				return cached;
 			}
-			// Don't immediately clear cache - let database query confirm before invalidating
+			// Clear expired cache immediately
+			statsCache.delete(cacheKey);
 		}
 
 		const now = Date.now();
@@ -145,24 +146,13 @@ export class SessionTracker {
 				now
 			);
 		} catch (error) {
-			// If database query fails and we have cached data that's close to valid, use it
-			if (cached && cached.endTime.getTime() > Date.now() - 30000) { // 30 second grace period
-				logger.debug('Database query failed, using cached session data as fallback');
-				return cached;
-			}
 			logger.error('Failed to query active session:', error);
 			return null;
 		}
 
 		const result = row ? this.rowToSessionData(row) : null;
 		
-		// Only clear cache if we got a definitive result from database
-		if (cached !== undefined && (!result || result.id !== cached?.id)) {
-			statsCache.delete(cacheKey);
-		}
-		
 		// Cache for 10 seconds (frequent access during session)
-		// Always cache the result, even if null, to prevent hammering DB
 		statsCache.set(cacheKey, result, 10000);
 		
 		return result;

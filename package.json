@@ -1,6 +1,6 @@
 {
 	"name": "santa-claude",
-	"version": "0.1.1",
+	"version": "0.1.2",
 	"description": "A Claude Code wrapper that monitors session activity and token usage",
 	"main": "dist/cli.js",
 	"exports": {
